@@ -221,7 +221,7 @@ void checkVercelQueue() {
     if (httpCode == HTTP_CODE_OK) {
       String payload = https.getString();
 
-      // Agar javobda "packets" bo'lsa va count > 0 bo'lsa
+      // Agar javobda paketlar mavjud bo'lsa
       if (payload.indexOf("\"count\":0") == -1 && payload.indexOf("\"packets\":[") >= 0) {
         Serial.println("\n🌐 [VERCEL CLOUD] Yangi paket qabul qilindi!");
         Serial.println(payload);
@@ -247,6 +247,13 @@ void checkVercelQueue() {
 
         uint32_t color = parseHexColor(colorHex);
         triggerPacketAnimation(target, color);
+      }
+    } else {
+      // Har soniya ekranni to'ldirmaslik uchun faqat jiddiy xato bo'lsa
+      static unsigned long lastErr = 0;
+      if (millis() - lastErr > 5000) {
+        lastErr = millis();
+        Serial.printf("[CLOUD-STATUS] HTTP Code: %d (%s)\n", httpCode, https.errorToString(httpCode).c_str());
       }
     }
     https.end();
