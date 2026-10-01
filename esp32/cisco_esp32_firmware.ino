@@ -216,6 +216,36 @@ void handleSendWan() {
   }
 }
 
+// GET /testLed?index=0&color=%2300ffcc
+void handleTestLed() {
+  sendCorsHeader();
+  int index = server.hasArg("index") ? server.arg("index").toInt() : 0;
+  String colorHex = server.hasArg("color") ? server.arg("color") : "#00ffcc";
+  uint32_t color = parseHexColor(colorHex);
+
+  if (index >= 0 && index < cfg.total) {
+    strip->clear();
+    strip->setPixelColor(index, color);
+    strip->show();
+    Serial.printf("[TEST-LED] LED #%d yondi (Rang: %s)\n", index, colorHex.c_str());
+  }
+  server.send(200, "application/json", "{\"success\":true,\"index\":" + String(index) + "}");
+}
+
+// GET /testAll?color=%23ffffff
+void handleTestAll() {
+  sendCorsHeader();
+  String colorHex = server.hasArg("color") ? server.arg("color") : "#ffffff";
+  uint32_t color = parseHexColor(colorHex);
+
+  for (int i = 0; i < cfg.total; i++) {
+    strip->setPixelColor(i, color);
+  }
+  strip->show();
+  Serial.printf("[TEST-ALL] Barcha %d ta LED yondi\n", cfg.total);
+  server.send(200, "application/json", "{\"success\":true,\"total\":" + String(cfg.total) + "}");
+}
+
 // GET /getConfig
 void handleGetConfig() {
   sendCorsHeader();
@@ -289,6 +319,8 @@ void setup() {
   server.on("/ping", HTTP_GET, handlePing);
   server.on("/clear", HTTP_GET, handleClear);
   server.on("/sendWan", HTTP_GET, handleSendWan);
+  server.on("/testLed", HTTP_GET, handleTestLed);
+  server.on("/testAll", HTTP_GET, handleTestAll);
   server.on("/getConfig", HTTP_GET, handleGetConfig);
   server.on("/saveConfig", HTTP_GET, handleSaveConfig);
 

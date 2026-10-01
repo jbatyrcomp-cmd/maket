@@ -212,6 +212,69 @@
         </div>
       </div>
 
+      <!-- ========================================== -->
+      <!-- NEW: HAR BIR LEDNI ALOHIDA TEKSHIRISH BLOKI -->
+      <!-- ========================================== -->
+      <div class="bg-slate-900/90 border border-cyan-800/60 rounded-2xl p-4 shadow-xl backdrop-blur-md">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-cyan-400 animate-pulse"></span>
+            <h3 class="text-xs font-bold font-mono uppercase tracking-wider text-cyan-300">
+              🔬 Har Bir LEDni Alohida Tekshirish (LED Inspector)
+            </h3>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="color" id="testLedColor" value="#00ffcc" class="w-6 h-6 rounded cursor-pointer border border-slate-700 bg-transparent" title="Test rangi">
+            <span id="activeLedIndexBadge" class="text-xs font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-700 font-bold">
+              LED #0
+            </span>
+          </div>
+        </div>
+
+        <!-- Controls: Prev, Next, Slider, Auto-Sweep -->
+        <div class="mt-3 space-y-3">
+          <div class="flex items-center gap-2">
+            <button type="button" id="prevLedBtn" class="flex-1 py-2 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-mono text-xs font-bold border border-slate-700 flex items-center justify-center gap-1 transition-all">
+              ◀ Oldingi
+            </button>
+            <button type="button" id="nextLedBtn" class="flex-1 py-2 px-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-mono text-xs font-bold shadow-md flex items-center justify-center gap-1 transition-all">
+              Keyingi ▶
+            </button>
+            <button type="button" id="autoSweepBtn" class="flex-1 py-2 px-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold shadow-md flex items-center justify-center gap-1 transition-all">
+              🔄 Avto-Skan
+            </button>
+          </div>
+
+          <!-- Slider -->
+          <div class="flex items-center gap-3">
+            <span class="text-[11px] font-mono text-slate-400">#0</span>
+            <input type="range" id="ledIndexSlider" min="0" max="59" value="0" class="flex-1 h-2 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-cyan-400 border border-slate-700">
+            <span id="maxLedLabel" class="text-[11px] font-mono text-slate-400">#59</span>
+          </div>
+
+          <!-- Quick Action Buttons -->
+          <div class="flex items-center justify-between gap-2 pt-1">
+            <button type="button" id="testAllLedsBtn" class="flex-1 py-1.5 px-2 rounded-lg bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-800/80 font-mono text-[11px] font-semibold transition-all">
+              💡 Barchasini Yoqish (All ON)
+            </button>
+            <button type="button" id="testClearLedsBtn" class="flex-1 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-mono text-[11px] font-semibold transition-all">
+              ⚫ Barchasini O'chirish
+            </button>
+          </div>
+
+          <!-- Interactive Clickable LED Grid (60 LEDs) -->
+          <div class="pt-2 border-t border-slate-800/60">
+            <div class="text-[10px] font-mono text-slate-400 mb-1.5 flex items-center justify-between">
+              <span>Lenta xaritasi (bosib sinang):</span>
+              <span class="text-cyan-400">Har bir katak = 1 ta jismoniy LED</span>
+            </div>
+            <div id="ledGridContainer" class="grid grid-cols-12 sm:grid-cols-15 gap-1 max-h-28 overflow-y-auto p-1.5 bg-slate-950 rounded-xl border border-slate-800/80">
+              <!-- Dynamically populated via JS -->
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Cisco Terminal Console Log Card -->
       <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl flex-1 flex flex-col backdrop-blur-md min-h-[380px]">
         <div class="flex items-center justify-between pb-3 border-b border-slate-800/80">
@@ -595,6 +658,141 @@
       terminalOutput.innerHTML = '';
       log('[CONSOLE] Konsol loglari tozalandi', 'text-slate-500');
     });
+
+    // ==========================================
+    // LED INSPECTOR CONTROLLER (Single LED Testing)
+    // ==========================================
+    let currentLedIndex = 0;
+    let autoSweepInterval = null;
+    const testLedColor = document.getElementById('testLedColor');
+    const activeLedIndexBadge = document.getElementById('activeLedIndexBadge');
+    const ledIndexSlider = document.getElementById('ledIndexSlider');
+    const maxLedLabel = document.getElementById('maxLedLabel');
+    const prevLedBtn = document.getElementById('prevLedBtn');
+    const nextLedBtn = document.getElementById('nextLedBtn');
+    const autoSweepBtn = document.getElementById('autoSweepBtn');
+    const testAllLedsBtn = document.getElementById('testAllLedsBtn');
+    const testClearLedsBtn = document.getElementById('testClearLedsBtn');
+    const ledGridContainer = document.getElementById('ledGridContainer');
+
+    function getTotalLeds() {
+      return parseInt(cfgTotal.value, 10) || 60;
+    }
+
+    function renderLedGrid() {
+      const total = getTotalLeds();
+      ledIndexSlider.max = total - 1;
+      maxLedLabel.textContent = '#' + (total - 1);
+
+      ledGridContainer.innerHTML = '';
+      for (let i = 0; i < total; i++) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `h-6 text-[10px] font-mono rounded flex items-center justify-center border transition-all ${
+          i === currentLedIndex 
+            ? 'bg-cyan-400 text-slate-950 font-bold border-white shadow-md' 
+            : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-cyan-500'
+        }`;
+        btn.textContent = i;
+        btn.title = `LED #${i}`;
+        btn.addEventListener('click', () => {
+          setAndTestLed(i);
+        });
+        ledGridContainer.appendChild(btn);
+      }
+    }
+
+    function setAndTestLed(index) {
+      const total = getTotalLeds();
+      if (index < 0) index = total - 1;
+      if (index >= total) index = 0;
+      currentLedIndex = index;
+
+      activeLedIndexBadge.textContent = `LED #${currentLedIndex}`;
+      ledIndexSlider.value = currentLedIndex;
+
+      // Update grid highlights
+      const btns = ledGridContainer.querySelectorAll('button');
+      btns.forEach((b, idx) => {
+        if (idx === currentLedIndex) {
+          b.className = 'h-6 text-[10px] font-mono rounded flex items-center justify-center border bg-cyan-400 text-slate-950 font-bold border-white shadow-md scale-105';
+        } else {
+          b.className = 'h-6 text-[10px] font-mono rounded flex items-center justify-center border bg-slate-900 text-slate-400 border-slate-800 hover:border-cyan-500';
+        }
+      });
+
+      // Send to ESP32: /testLed?index=...&color=...
+      const espIp = getEspIp();
+      const color = encodeURIComponent(testLedColor.value);
+      const url = `${espIp}/testLed?index=${currentLedIndex}&color=${color}`;
+      log(`[TEST-LED] LED #${currentLedIndex} yoqilmoqda: ${url}`, 'text-cyan-400');
+      sendHttpCommand(url);
+    }
+
+    prevLedBtn.addEventListener('click', () => {
+      stopAutoSweep();
+      setAndTestLed(currentLedIndex - 1);
+    });
+
+    nextLedBtn.addEventListener('click', () => {
+      stopAutoSweep();
+      setAndTestLed(currentLedIndex + 1);
+    });
+
+    ledIndexSlider.addEventListener('input', (e) => {
+      stopAutoSweep();
+      setAndTestLed(parseInt(e.target.value, 10));
+    });
+
+    // Auto sweep toggle
+    autoSweepBtn.addEventListener('click', () => {
+      if (autoSweepInterval) {
+        stopAutoSweep();
+      } else {
+        autoSweepBtn.className = 'flex-1 py-2 px-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-mono text-xs font-bold shadow-md flex items-center justify-center gap-1 transition-all';
+        autoSweepBtn.textContent = '⏹ To\'xtatish';
+        log('[AUTO-SWEEP] Ketma-ket tekshirish boshlandi...', 'text-indigo-400');
+        autoSweepInterval = setInterval(() => {
+          setAndTestLed(currentLedIndex + 1);
+        }, 180);
+      }
+    });
+
+    function stopAutoSweep() {
+      if (autoSweepInterval) {
+        clearInterval(autoSweepInterval);
+        autoSweepInterval = null;
+        autoSweepBtn.className = 'flex-1 py-2 px-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold shadow-md flex items-center justify-center gap-1 transition-all';
+        autoSweepBtn.textContent = '🔄 Avto-Skan';
+        log('[AUTO-SWEEP] To\'xtatildi', 'text-slate-400');
+      }
+    }
+
+    // Test All LEDs ON
+    testAllLedsBtn.addEventListener('click', () => {
+      stopAutoSweep();
+      const espIp = getEspIp();
+      const color = encodeURIComponent(testLedColor.value);
+      const url = `${espIp}/testAll?color=${color}`;
+      log(`[TEST-ALL] Barcha LEDlarni yoqish: ${url}`, 'text-amber-400');
+      sendHttpCommand(url);
+      showToast('Barcha LEDlar yoqildi', 'info');
+    });
+
+    // Test Clear
+    testClearLedsBtn.addEventListener('click', () => {
+      stopAutoSweep();
+      const espIp = getEspIp();
+      log(`[TEST-CLEAR] Lentani o'chirish: ${espIp}/clear`, 'text-slate-400');
+      sendHttpCommand(`${espIp}/clear`);
+      showToast('Lenta o\'chirildi', 'info');
+    });
+
+    // Total LEDs o'zgarganda xaritani yangilash
+    cfgTotal.addEventListener('change', renderLedGrid);
+
+    // Initial grid render
+    renderLedGrid();
 
     // ==========================================
     // POLLING ENGINE (GET /api/packets)
