@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="uz" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cisco Bridge & Admin Panel - ESP32 Gateway</title>
+  
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Outfit', 'sans-serif'],
+            mono: ['Fira Code', 'monospace'],
+            display: ['Rajdhani', 'sans-serif'],
+          },
+          colors: {
+            cyber: {
+              bg: '#090d16',
+              surface: '#0f172a',
+              card: '#141e33',
+              border: '#1e293b',
+              accent: '#00ffcc',
+              blue: '#0099ff',
+              emerald: '#10b981',
+              warning: '#f59e0b',
+              danger: '#ef4444'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #080c14;
+      background-image: 
+        radial-gradient(circle at 10% 10%, rgba(0, 153, 255, 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 90% 90%, rgba(0, 255, 204, 0.05) 0%, transparent 40%),
+        linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+      background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+    }
+
+    /* Custom Scrollbar for Terminal */
+    .terminal-scroll::-webkit-scrollbar {
+      width: 6px;
+    }
+    .terminal-scroll::-webkit-scrollbar-track {
+      background: #090e17;
+    }
+    .terminal-scroll::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 3px;
+    }
+    .terminal-scroll::-webkit-scrollbar-thumb:hover {
+      background: #00ffcc;
+    }
+
+    .glow-cyan {
+      box-shadow: 0 0 15px rgba(0, 255, 204, 0.25);
+    }
+    .glow-blue {
+      box-shadow: 0 0 15px rgba(0, 153, 255, 0.25);
+    }
+  </style>
+</head>
+<body class="min-h-screen text-slate-100 flex flex-col font-sans selection:bg-cyan-500 selection:text-black">
+
+  <!-- Admin Navigation Bar -->
+  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-50 px-4 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center space-x-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+          <svg class="w-5 h-5 text-slate-950 font-bold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-base font-bold font-display tracking-wider text-white flex items-center gap-2">
+            CISCO PACKET TRACER <span class="text-xs font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800">ADMIN GATEWAY</span>
+          </h1>
+          <p class="text-xs text-slate-400">Vercel Cloud Queue ➔ Local ESP32 Bridge System</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <a href="/" target="_blank" class="text-xs font-mono text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+          </svg>
+          Klient Sahifasi
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Grid -->
+  <main class="max-w-7xl mx-auto w-full px-4 py-6 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- ========================================== -->
+    <!-- LEFT PANEL: BRIDGE ENGINE & LIVE TERMINAL (7 cols) -->
+    <!-- ========================================== -->
+    <section class="lg:col-span-7 flex flex-col gap-5">
+
+      <!-- ESP32 Connection & Bridge Control Card -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl backdrop-blur-md">
+        <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+          <div class="flex items-center gap-2">
+            <span class="relative flex h-3 w-3">
+              <span id="bridgePingDot" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+              <span id="bridgeStatusDot" class="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+            </span>
+            <h2 class="text-sm font-bold font-display uppercase tracking-wider text-white">
+              1. Jonli Ko'prik (Bridge) Holati
+            </h2>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="bridgeStatusText" class="text-xs font-mono px-2.5 py-1 rounded-md bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 font-semibold">
+              FAOL (Polling 1s)
+            </span>
+          </div>
+        </div>
+
+        <!-- ESP32 IP input & Controls -->
+        <div class="mt-4 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+          <div class="sm:col-span-8">
+            <label for="espIpInput" class="block text-xs font-mono font-medium text-slate-400 mb-1">
+              ESP32 Lokal Manzili (Wi-Fi AP yoki STA IP)
+            </label>
+            <div class="relative">
+              <input 
+                type="text" 
+                id="espIpInput" 
+                value="http://192.168.4.1" 
+                placeholder="http://192.168.4.1"
+                class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono text-cyan-300 focus:outline-none focus:border-cyan-400 transition-all"
+              >
+              <button 
+                type="button" 
+                id="pingEspBtn" 
+                class="absolute right-2 top-2 text-[11px] font-mono text-slate-400 hover:text-cyan-300 bg-slate-800 px-2 py-0.5 rounded border border-slate-700"
+                title="Bog'lanishni tekshirish"
+              >
+                Ping
+              </button>
+            </div>
+          </div>
+
+          <div class="sm:col-span-4 flex gap-2">
+            <button 
+              type="button" 
+              id="toggleBridgeBtn"
+              class="w-full py-2 px-3 rounded-xl font-mono text-xs font-bold transition-all bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg flex items-center justify-center gap-1.5"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <span id="toggleBridgeText">Pauza</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Quick Action Buttons -->
+        <div class="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400">Tezkor Test:</span>
+            <button type="button" onclick="sendTestPacket('PC1')" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700">➔ PC1</button>
+            <button type="button" onclick="sendTestPacket('PC2')" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700">➔ PC2</button>
+            <button type="button" onclick="sendTestPacket('Server0')" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700">➔ Server</button>
+          </div>
+
+          <button 
+            type="button" 
+            id="clearLedStripBtn"
+            class="px-3 py-1 rounded bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/60 flex items-center gap-1.5 transition-all"
+            title="Lentadagi barcha LEDlarni o'chiradi"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+            Lentani Tozalash (Clear)
+          </button>
+        </div>
+
+        <!-- Realtime Statistics Counters -->
+        <div class="mt-4 grid grid-cols-3 gap-2 text-center text-xs font-mono">
+          <div class="bg-slate-950/60 p-2 rounded-xl border border-slate-800/60">
+            <div class="text-slate-500 text-[10px]">VERCEL QUEUE</div>
+            <div id="statQueueCount" class="text-base font-bold text-cyan-400 mt-0.5">0</div>
+          </div>
+          <div class="bg-slate-950/60 p-2 rounded-xl border border-slate-800/60">
+            <div class="text-slate-500 text-[10px]">ESP32 GA YUBORILDI</div>
+            <div id="statDeliveredCount" class="text-base font-bold text-emerald-400 mt-0.5">0</div>
+          </div>
+          <div class="bg-slate-950/60 p-2 rounded-xl border border-slate-800/60">
+            <div class="text-slate-500 text-[10px]">OXIRGI PAKET</div>
+            <div id="statLastPacketTime" class="text-xs font-bold text-slate-300 mt-1 truncate">Kutilmoqda...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cisco Terminal Console Log Card -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl flex-1 flex flex-col backdrop-blur-md min-h-[380px]">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800/80">
+          <div class="flex items-center gap-2">
+            <div class="flex gap-1.5">
+              <span class="w-3 h-3 rounded-full bg-rose-500/80"></span>
+              <span class="w-3 h-3 rounded-full bg-amber-500/80"></span>
+              <span class="w-3 h-3 rounded-full bg-emerald-500/80"></span>
+            </div>
+            <span class="text-xs font-mono text-slate-400 font-semibold ml-2">
+              cisco-bridge@esp32:~$ live-stream
+            </span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <label class="text-[11px] font-mono text-slate-400 flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" id="autoScrollCheck" checked class="rounded bg-slate-950 border-slate-700 text-cyan-500 focus:ring-0">
+              Auto-scroll
+            </label>
+            <button 
+              type="button" 
+              id="clearLogsBtn"
+              class="text-[11px] font-mono text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded transition-all"
+            >
+              Tozalash
+            </button>
+          </div>
+        </div>
+
+        <!-- Terminal Output Window -->
+        <div 
+          id="terminalOutput" 
+          class="terminal-scroll mt-3 flex-1 bg-slate-950 border border-slate-800/80 rounded-xl p-3.5 font-mono text-[11.5px] leading-relaxed overflow-y-auto space-y-1.5 select-text"
+        >
+          <!-- Log lines will be appended here dynamically -->
+          <div class="text-slate-500">[SYSTEM] Cisco Packet Tracer Admin Gateway ishga tushirildi.</div>
+          <div class="text-cyan-400">[INFO] Vercel Serverless navbati: /api/packets (Har 1000ms tekshiriladi)</div>
+          <div class="text-emerald-400">[READY] ESP32 kutish holatida. Yangi paketlar avtomatik uzatiladi...</div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ========================================== -->
+    <!-- RIGHT PANEL: HARDWARE & LED SEGMENTS (5 cols) -->
+    <!-- ========================================== -->
+    <section class="lg:col-span-5 flex flex-col gap-5">
+
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl backdrop-blur-md">
+        
+        <!-- Hardware Header -->
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800/80">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+              </svg>
+            </div>
+            <div>
+              <h2 class="text-sm font-bold font-display uppercase tracking-wider text-white">
+                2. Plata va Segmentlar Sozlamalari
+              </h2>
+              <p class="text-[11px] text-slate-400">ESP32 NVS / EEPROM Hardware Setup</p>
+            </div>
+          </div>
+
+          <button 
+            type="button" 
+            id="loadConfigBtn"
+            class="text-xs font-mono text-cyan-300 hover:text-white bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-800/80 px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all"
+            title="ESP32 dan getConfig so'rab oladi"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Yuklash
+          </button>
+        </div>
+
+        <!-- Hardware Form -->
+        <form id="hardwareForm" class="mt-4 space-y-4">
+
+          <!-- 1. GPIO Pin & Total LEDs -->
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label for="cfgPin" class="block text-xs font-mono font-medium text-slate-300 mb-1">
+                LED Data Pini (GPIO)
+              </label>
+              <select 
+                id="cfgPin" 
+                class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-indigo-400"
+              >
+                <option value="4">GPIO 4 (D4)</option>
+                <option value="2">GPIO 2 (D2)</option>
+                <option value="5">GPIO 5 (D5)</option>
+                <option value="12">GPIO 12 (D12)</option>
+                <option value="13">GPIO 13 (D13)</option>
+                <option value="14">GPIO 14 (D14)</option>
+                <option value="15">GPIO 15 (D15)</option>
+                <option value="18">GPIO 18 (D18)</option>
+                <option value="19">GPIO 19 (D19)</option>
+                <option value="21">GPIO 21 (D21)</option>
+                <option value="22">GPIO 22 (D22)</option>
+                <option value="23">GPIO 23 (D23)</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="cfgTotal" class="block text-xs font-mono font-medium text-slate-300 mb-1">
+                Jami LED Soni
+              </label>
+              <input 
+                type="number" 
+                id="cfgTotal" 
+                value="60" 
+                min="10" 
+                max="300"
+                class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono text-white focus:outline-none focus:border-indigo-400"
+              >
+            </div>
+          </div>
+
+          <!-- 2. Brightness Slider -->
+          <div>
+            <div class="flex items-center justify-between text-xs font-mono mb-1">
+              <span class="text-slate-300 font-medium">Lenta Yorqinligi (0-255)</span>
+              <span id="brightnessValText" class="text-cyan-400 font-bold">120 (47%)</span>
+            </div>
+            <input 
+              type="range" 
+              id="cfgBrightness" 
+              min="10" 
+              max="255" 
+              value="120"
+              class="w-full h-2 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-cyan-400 border border-slate-700"
+            >
+          </div>
+
+          <!-- 3. LED Segments Ranges Table -->
+          <div class="pt-2">
+            <h3 class="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+              <span>Segment Oraliqlari (Start - End)</span>
+              <span class="text-[10px] text-slate-500 font-normal">0-indekslangan</span>
+            </h3>
+
+            <div class="space-y-2.5 text-xs font-mono">
+
+              <!-- WAN Segment -->
+              <div class="bg-slate-950/70 p-2.5 rounded-xl border border-cyan-900/40 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 shrink-0"></span>
+                  <span class="text-cyan-300 font-semibold">WAN (Optik Tola):</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <input type="number" id="wan_start" value="0" min="0" class="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white">
+                  <span class="text-slate-500">-</span>
+                  <input type="number" id="wan_end" value="11" min="0" class="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white">
+                </div>
+              </div>
+
+              <!-- Router -> Switch -->
+              <div class="bg-slate-950/70 p-2.5 rounded-xl border border-blue-900/40 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-blue-400 shrink-0"></span>
+                  <span class="text-blue-300 font-semibold">Router ➔ Switch:</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <input type="number" id="r_sw_start" value="12" min="0" class="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white">
+                  <span class="text-slate-500">-</span>
+                  <input type="number" id="r_sw_end" value="19" min="0" class="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white">
+                </div>
+              </div>
+
+              <!-- Switch -> PC1 -->
+              <div class="bg-slate-950/70 p-2.5 rounded-xl border border-emerald-900/40 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0"></span>
+                  <div>
+                    <span class="text-emerald-300 font-semibold block">Switch ➔ PC1 + Mon:</span>
+                    <span class="text-[10px] text-slate-500">Kabel + 6 LED Monitor</span>
+                  </div>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <input type="number" id="pc1_start" value="20" min="0" class="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white">
+                  <span class="text-slate-500">-</span>
+                  <input type="number" id="pc1_end" value="31" min="0" class="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white">
+                </div>
+              </div>
+
+              <!-- Switch -> PC2 -->
+              <div class="bg-slate-950/70 p-2.5 rounded-xl border border-amber-900/40 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0"></span>
+                  <div>
+                    <span class="text-amber-300 font-semibold block">Switch ➔ PC2 + Mon:</span>
+                    <span class="text-[10px] text-slate-500">Kabel + 6 LED Monitor</span>
+                  </div>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <input type="number" id="pc2_start" value="32" min="0" class="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white">
+                  <span class="text-slate-500">-</span>
+                  <input type="number" id="pc2_end" value="43" min="0" class="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white">
+                </div>
+              </div>
+
+              <!-- Switch -> Server0 -->
+              <div class="bg-slate-950/70 p-2.5 rounded-xl border border-purple-900/40 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-purple-400 shrink-0"></span>
+                  <div>
+                    <span class="text-purple-300 font-semibold block">Switch ➔ Server + Mon:</span>
+                    <span class="text-[10px] text-slate-500">Kabel + 6 LED Monitor</span>
+                  </div>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <input type="number" id="srv_start" value="44" min="0" class="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white">
+                  <span class="text-slate-500">-</span>
+                  <input type="number" id="srv_end" value="55" min="0" class="w-14 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-center text-white">
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Save Button -->
+          <div class="pt-2">
+            <button 
+              type="submit" 
+              id="saveConfigBtn"
+              class="w-full py-3 px-4 rounded-xl font-mono text-sm font-bold bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 uppercase tracking-wider shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/>
+              </svg>
+              <span>Xotiraga Saqlash (Save to ESP32)</span>
+            </button>
+          </div>
+
+        </form>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Notification Toast -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none">
+    <div id="toastContent" class="bg-slate-900 border border-cyan-500 text-white px-4 py-3 rounded-xl shadow-2xl font-mono text-xs flex items-center gap-2.5">
+      <span id="toastIcon">✨</span>
+      <span id="toastMsg">Xabar</span>
+    </div>
+  </div>
+
+  <!-- JavaScript Admin & Bridge Controller -->
+  <script>
+    // State
+    let bridgeActive = true;
+    let pollInterval = 1000;
+    let pollTimer = null;
+    let deliveredPacketsCount = 0;
+    let isRequestInProgress = false;
+
+    // Elements
+    const espIpInput = document.getElementById('espIpInput');
+    const pingEspBtn = document.getElementById('pingEspBtn');
+    const toggleBridgeBtn = document.getElementById('toggleBridgeBtn');
+    const toggleBridgeText = document.getElementById('toggleBridgeText');
+    const bridgeStatusText = document.getElementById('bridgeStatusText');
+    const bridgeStatusDot = document.getElementById('bridgeStatusDot');
+    const bridgePingDot = document.getElementById('bridgePingDot');
+    const clearLedStripBtn = document.getElementById('clearLedStripBtn');
+    const terminalOutput = document.getElementById('terminalOutput');
+    const autoScrollCheck = document.getElementById('autoScrollCheck');
+    const clearLogsBtn = document.getElementById('clearLogsBtn');
+    const statQueueCount = document.getElementById('statQueueCount');
+    const statDeliveredCount = document.getElementById('statDeliveredCount');
+    const statLastPacketTime = document.getElementById('statLastPacketTime');
+
+    // Hardware Form Elements
+    const hardwareForm = document.getElementById('hardwareForm');
+    const loadConfigBtn = document.getElementById('loadConfigBtn');
+    const cfgPin = document.getElementById('cfgPin');
+    const cfgTotal = document.getElementById('cfgTotal');
+    const cfgBrightness = document.getElementById('cfgBrightness');
+    const brightnessValText = document.getElementById('brightnessValText');
+
+    const wan_start = document.getElementById('wan_start');
+    const wan_end = document.getElementById('wan_end');
+    const r_sw_start = document.getElementById('r_sw_start');
+    const r_sw_end = document.getElementById('r_sw_end');
+    const pc1_start = document.getElementById('pc1_start');
+    const pc1_end = document.getElementById('pc1_end');
+    const pc2_start = document.getElementById('pc2_start');
+    const pc2_end = document.getElementById('pc2_end');
+    const srv_start = document.getElementById('srv_start');
+    const srv_end = document.getElementById('srv_end');
+
+    // Restore saved ESP IP from localStorage
+    const savedEspIp = localStorage.getItem('cisco_esp_ip');
+    if (savedEspIp) {
+      espIpInput.value = savedEspIp;
+    }
+
+    // Save ESP IP change
+    espIpInput.addEventListener('change', () => {
+      let ip = espIpInput.value.trim();
+      if (!ip.startsWith('http://') && !ip.startsWith('https://')) {
+        ip = 'http://' + ip;
+        espIpInput.value = ip;
+      }
+      localStorage.setItem('cisco_esp_ip', ip);
+      log(`[CONFIG] ESP32 manzili o'zgartirildi: ${ip}`, 'text-amber-400');
+    });
+
+    // Brightness slider event
+    cfgBrightness.addEventListener('input', (e) => {
+      const val = e.target.value;
+      const pct = Math.round((val / 255) * 100);
+      brightnessValText.textContent = `${val} (${pct}%)`;
+    });
+
+    // Start polling loop
+    startBridgePolling();
+
+    // Toggle bridge button handler
+    toggleBridgeBtn.addEventListener('click', () => {
+      bridgeActive = !bridgeActive;
+      if (bridgeActive) {
+        toggleBridgeBtn.className = 'w-full py-2 px-3 rounded-xl font-mono text-xs font-bold transition-all bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg flex items-center justify-center gap-1.5';
+        toggleBridgeText.textContent = 'Pauza';
+        bridgeStatusText.textContent = 'FAOL (Polling 1s)';
+        bridgeStatusText.className = 'text-xs font-mono px-2.5 py-1 rounded-md bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 font-semibold';
+        bridgeStatusDot.className = 'relative inline-flex rounded-full h-3 w-3 bg-cyan-500';
+        bridgePingDot.classList.remove('hidden');
+        log('[BRIDGE] Ko\'prik faollashtirildi (Polling boshlandi)', 'text-emerald-400');
+        startBridgePolling();
+      } else {
+        toggleBridgeBtn.className = 'w-full py-2 px-3 rounded-xl font-mono text-xs font-bold transition-all bg-amber-600 hover:bg-amber-500 text-white shadow-lg flex items-center justify-center gap-1.5';
+        toggleBridgeText.textContent = 'Boshlash';
+        bridgeStatusText.textContent = 'TO\'XTATILGAN';
+        bridgeStatusText.className = 'text-xs font-mono px-2.5 py-1 rounded-md bg-amber-950/80 text-amber-400 border border-amber-800/60 font-semibold';
+        bridgeStatusDot.className = 'relative inline-flex rounded-full h-3 w-3 bg-amber-500';
+        bridgePingDot.classList.add('hidden');
+        if (pollTimer) clearInterval(pollTimer);
+        log('[BRIDGE] Ko\'prik vaqtincha to\'xtatildi', 'text-amber-400');
+      }
+    });
+
+    // Ping ESP32 Button
+    pingEspBtn.addEventListener('click', async () => {
+      const espIp = getEspIp();
+      log(`[PING] ESP32 ga so'rov yuborilmoqda: ${espIp}/ping`, 'text-cyan-400');
+      try {
+        const start = Date.now();
+        await fetch(`${espIp}/ping`, { mode: 'no-cors' });
+        const latency = Date.now() - start;
+        log(`[PONG] ESP32 aloqada! Kechikish: ~${latency}ms`, 'text-emerald-400');
+        showToast('ESP32 javob berdi!', 'success');
+      } catch (err) {
+        log(`[PING-FAIL] ESP32 ga ulanib bo'lmadi. Wi-Fi ga ulanganingizni tekshiring!`, 'text-rose-400');
+        showToast('ESP32 ga ulanib bo\'lmadi', 'error');
+      }
+    });
+
+    // Clear LED Strip Button
+    clearLedStripBtn.addEventListener('click', async () => {
+      const espIp = getEspIp();
+      log(`[CLEAR] Lentani tozalash so'rovi uzatilmoqda: ${espIp}/clear`, 'text-amber-400');
+      try {
+        await fetch(`${espIp}/clear`, { mode: 'no-cors' });
+        log(`[SUCCESS] Lentadagi barcha LEDlar o'chirildi`, 'text-emerald-400');
+        showToast('LED lenta tozalandi', 'info');
+      } catch (err) {
+        log(`[CLEAR-ERR] ${err.message}`, 'text-rose-400');
+      }
+    });
+
+    // Clear logs button
+    clearLogsBtn.addEventListener('click', () => {
+      terminalOutput.innerHTML = '';
+      log('[CONSOLE] Konsol loglari tozalandi', 'text-slate-500');
+    });
+
+    // ==========================================
+    // POLLING ENGINE (GET /api/packets)
+    // ==========================================
+    function startBridgePolling() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        if (!bridgeActive || isRequestInProgress) return;
+
+        isRequestInProgress = true;
+        try {
+          const res = await fetch('/api/packets');
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+
+          const data = await res.json();
+          if (data.success && data.packets && data.packets.length > 0) {
+            statQueueCount.textContent = data.packets.length;
+            log(`[QUEUE-RX] Vercel dan ${data.packets.length} ta yangi paket qabul qilindi`, 'text-cyan-300 font-semibold');
+
+            // Dispatch each packet sequentially to local ESP32
+            for (const pkt of data.packets) {
+              await forwardPacketToEsp32(pkt);
+            }
+
+            statQueueCount.textContent = '0';
+          }
+        } catch (err) {
+          // If queue check fails
+          // We don't flood log every second, just show if continuous
+        } finally {
+          isRequestInProgress = false;
+        }
+      }, pollInterval);
+    }
+
+    // Forward packet to ESP32: /sendWan?target=...&color=...
+    async function forwardPacketToEsp32(pkt) {
+      const espIp = getEspIp();
+      const target = encodeURIComponent(pkt.target);
+      const color = encodeURIComponent(pkt.color);
+      const url = `${espIp}/sendWan?target=${target}&color=${color}`;
+
+      log(`[BRIDGE ➔ ESP32] Yuborilmoqda: [${pkt.sender}] ➔ ${pkt.target} (${pkt.color})`, 'text-emerald-400');
+
+      try {
+        // mode: 'no-cors' is crucial because ESP32 runs on private IP without HTTPS and strict CORS headers
+        await fetch(url, { mode: 'no-cors' });
+
+        deliveredPacketsCount++;
+        statDeliveredCount.textContent = deliveredPacketsCount;
+        statLastPacketTime.textContent = `${pkt.target} (${new Date().toLocaleTimeString()})`;
+
+        log(`[DELIVERED] ${pkt.id} ESP32 ga muvaffaqiyatli uzatildi!`, 'text-cyan-400');
+        showToast(`Paket uzatildi: ${pkt.target}`, 'success');
+
+        // Short pause between packets so animations don't overlap too harshly
+        await new Promise(r => setTimeout(r, 600));
+      } catch (err) {
+        log(`[TX-ERROR] ${pkt.id} ESP32 ga yetkazilmadi: ${err.message}`, 'text-rose-400');
+      }
+    }
+
+    // Manual test packet sender
+    window.sendTestPacket = function(target) {
+      const testPkt = {
+        id: 'TEST-' + Math.floor(Math.random() * 1000),
+        sender: 'Admin-Test',
+        target: target,
+        color: '#00ffcc',
+        timeStr: new Date().toLocaleTimeString()
+      };
+      log(`[MANUAL-TEST] Test paketi ESP32 ga uzatilmoqda: ${target}`, 'text-indigo-400');
+      forwardPacketToEsp32(testPkt);
+    };
+
+    // ==========================================
+    // HARDWARE CONFIGURATION ENGINE
+    // ==========================================
+
+    // 1. Load config from ESP32: /getConfig
+    loadConfigBtn.addEventListener('click', async () => {
+      const espIp = getEspIp();
+      log(`[GET-CONFIG] ESP32 xotirasidan sozlamalar so'ralmoqda: ${espIp}/getConfig`, 'text-indigo-400');
+      loadConfigBtn.disabled = true;
+
+      try {
+        const res = await fetch(`${espIp}/getConfig`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const cfg = await res.json();
+        log(`[CONFIG-RX] Sozlamalar muvaffaqiyatli yuklandi: ${JSON.stringify(cfg)}`, 'text-emerald-400');
+
+        // Populate form
+        if (cfg.pin !== undefined) cfgPin.value = cfg.pin;
+        if (cfg.total !== undefined) cfgTotal.value = cfg.total;
+        if (cfg.brightness !== undefined) {
+          cfgBrightness.value = cfg.brightness;
+          const pct = Math.round((cfg.brightness / 255) * 100);
+          brightnessValText.textContent = `${cfg.brightness} (${pct}%)`;
+        }
+
+        if (cfg.wan_start !== undefined) wan_start.value = cfg.wan_start;
+        if (cfg.wan_end !== undefined) wan_end.value = cfg.wan_end;
+        if (cfg.r_sw_start !== undefined) r_sw_start.value = cfg.r_sw_start;
+        if (cfg.r_sw_end !== undefined) r_sw_end.value = cfg.r_sw_end;
+        if (cfg.pc1_start !== undefined) pc1_start.value = cfg.pc1_start;
+        if (cfg.pc1_end !== undefined) pc1_end.value = cfg.pc1_end;
+        if (cfg.pc2_start !== undefined) pc2_start.value = cfg.pc2_start;
+        if (cfg.pc2_end !== undefined) pc2_end.value = cfg.pc2_end;
+        if (cfg.srv_start !== undefined) srv_start.value = cfg.srv_start;
+        if (cfg.srv_end !== undefined) srv_end.value = cfg.srv_end;
+
+        showToast('Sozlamalar ESP32 dan yuklandi!', 'success');
+      } catch (err) {
+        log(`[CONFIG-ERR] getConfig xatosi: ${err.message}. (ESP32 yoqilganmi va Wi-Fi da turibsizmi?)`, 'text-rose-400');
+        showToast('ESP32 dan yuklab bo\'lmadi', 'error');
+      } finally {
+        loadConfigBtn.disabled = false;
+      }
+    });
+
+    // 2. Save config to ESP32: /saveConfig?pin=...
+    hardwareForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const espIp = getEspIp();
+      const params = new URLSearchParams({
+        pin: cfgPin.value,
+        total: cfgTotal.value,
+        brightness: cfgBrightness.value,
+        wan_start: wan_start.value,
+        wan_end: wan_end.value,
+        r_sw_start: r_sw_start.value,
+        r_sw_end: r_sw_end.value,
+        pc1_start: pc1_start.value,
+        pc1_end: pc1_end.value,
+        pc2_start: pc2_start.value,
+        pc2_end: pc2_end.value,
+        srv_start: srv_start.value,
+        srv_end: srv_end.value
+      });
+
+      const url = `${espIp}/saveConfig?${params.toString()}`;
+      log(`[SAVE-CONFIG] ESP32 NVS xotirasiga yozilmoqda: ${url}`, 'text-amber-400 font-semibold');
+
+      try {
+        await fetch(url, { mode: 'no-cors' });
+        log(`[SAVED] Sozlamalar saqlandi va ESP32 qayta ishga tushirildi/yangilandi!`, 'text-emerald-400 font-bold');
+        showToast('Sozlamalar xotiraga saqlandi!', 'success');
+      } catch (err) {
+        log(`[SAVE-FAIL] Saqlashda xatolik: ${err.message}`, 'text-rose-400');
+        showToast('Saqlashda xatolik yuz berdi', 'error');
+      }
+    });
+
+    // ==========================================
+    // UTILITIES
+    // ==========================================
+    function getEspIp() {
+      let ip = espIpInput.value.trim();
+      if (!ip) ip = 'http://192.168.4.1';
+      if (!ip.startsWith('http://') && !ip.startsWith('https://')) {
+        ip = 'http://' + ip;
+      }
+      return ip.replace(/\/$/, ''); // Remove trailing slash
+    }
+
+    function log(message, colorClass = 'text-slate-300') {
+      const time = new Date().toLocaleTimeString('uz-UZ', { hour12: false });
+      const line = document.createElement('div');
+      line.className = colorClass;
+      line.innerHTML = `<span class="text-slate-600">[${time}]</span> ${escapeHtml(message)}`;
+      terminalOutput.appendChild(line);
+
+      // Limit log entries to 300 lines
+      if (terminalOutput.children.length > 300) {
+        terminalOutput.removeChild(terminalOutput.firstChild);
+      }
+
+      if (autoScrollCheck.checked) {
+        terminalOutput.scrollTop = terminalOutput.scrollHeight;
+      }
+    }
+
+    function showToast(msg, type = 'info') {
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toastMsg');
+      const toastIcon = document.getElementById('toastIcon');
+      const toastContent = document.getElementById('toastContent');
+
+      toastMsg.textContent = msg;
+
+      if (type === 'success') {
+        toastIcon.textContent = '✅';
+        toastContent.className = 'bg-slate-900 border border-emerald-500 text-emerald-300 px-4 py-3 rounded-xl shadow-2xl font-mono text-xs flex items-center gap-2.5';
+      } else if (type === 'error') {
+        toastIcon.textContent = '⚠️';
+        toastContent.className = 'bg-slate-900 border border-rose-500 text-rose-300 px-4 py-3 rounded-xl shadow-2xl font-mono text-xs flex items-center gap-2.5';
+      } else {
+        toastIcon.textContent = '⚡';
+        toastContent.className = 'bg-slate-900 border border-cyan-500 text-cyan-300 px-4 py-3 rounded-xl shadow-2xl font-mono text-xs flex items-center gap-2.5';
+      }
+
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      toast.classList.add('translate-y-0', 'opacity-100');
+
+      setTimeout(() => {
+        toast.classList.remove('translate-y-0', 'opacity-100');
+        toast.classList.add('translate-y-20', 'opacity-0');
+      }, 3000);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

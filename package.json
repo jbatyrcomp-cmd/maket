@@ -1,0 +1,11 @@
+{
+  "name": "cisco-packet-tracer-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cisco Packet Tracer Physical Prototype & Web Controller",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["cisco", "esp32", "packet-tracer", "ws2812b", "iot", "vercel"]
+}
