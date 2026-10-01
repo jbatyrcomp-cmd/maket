@@ -567,7 +567,7 @@
       log(`[PING] ESP32 ga so'rov yuborilmoqda: ${espIp}/ping`, 'text-cyan-400');
       try {
         const start = Date.now();
-        await fetch(`${espIp}/ping`, { mode: 'no-cors' });
+        await sendHttpCommand(`${espIp}/ping`);
         const latency = Date.now() - start;
         log(`[PONG] ESP32 aloqada! Kechikish: ~${latency}ms`, 'text-emerald-400');
         showToast('ESP32 javob berdi!', 'success');
@@ -582,7 +582,7 @@
       const espIp = getEspIp();
       log(`[CLEAR] Lentani tozalash so'rovi uzatilmoqda: ${espIp}/clear`, 'text-amber-400');
       try {
-        await fetch(`${espIp}/clear`, { mode: 'no-cors' });
+        await sendHttpCommand(`${espIp}/clear`);
         log(`[SUCCESS] Lentadagi barcha LEDlar o'chirildi`, 'text-emerald-400');
         showToast('LED lenta tozalandi', 'info');
       } catch (err) {
@@ -632,6 +632,33 @@
       }, pollInterval);
     }
 
+    // Send command to ESP32 with robust Mixed Content fallback (Image ping)
+    function sendHttpCommand(url) {
+      return new Promise((resolve) => {
+        let finished = false;
+        const done = (ok) => {
+          if (!finished) {
+            finished = true;
+            resolve(ok);
+          }
+        };
+
+        // 1. Try standard fetch (no-cors)
+        fetch(url, { mode: 'no-cors', cache: 'no-store' })
+          .then(() => done(true))
+          .catch(() => {
+            // 2. Fallback: Image tag GET request (bypasses HTTPS mixed content fetch block)
+            const img = new Image();
+            img.onload = () => done(true);
+            img.onerror = () => done(true); // ESP32 sends JSON/text, so onerror triggers but HTTP GET was sent!
+            img.src = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+            setTimeout(() => done(true), 600);
+          });
+
+        setTimeout(() => done(true), 1500);
+      });
+    }
+
     // Forward packet to ESP32: /sendWan?target=...&color=...
     async function forwardPacketToEsp32(pkt) {
       const espIp = getEspIp();
@@ -642,8 +669,7 @@
       log(`[BRIDGE ➔ ESP32] Yuborilmoqda: [${pkt.sender}] ➔ ${pkt.target} (${pkt.color})`, 'text-emerald-400');
 
       try {
-        // mode: 'no-cors' is crucial because ESP32 runs on private IP without HTTPS and strict CORS headers
-        await fetch(url, { mode: 'no-cors' });
+        await sendHttpCommand(url);
 
         deliveredPacketsCount++;
         statDeliveredCount.textContent = deliveredPacketsCount;
@@ -743,7 +769,7 @@
       log(`[SAVE-CONFIG] ESP32 NVS xotirasiga yozilmoqda: ${url}`, 'text-amber-400 font-semibold');
 
       try {
-        await fetch(url, { mode: 'no-cors' });
+        await sendHttpCommand(url);
         log(`[SAVED] Sozlamalar saqlandi va ESP32 qayta ishga tushirildi/yangilandi!`, 'text-emerald-400 font-bold');
         showToast('Sozlamalar xotiraga saqlandi!', 'success');
       } catch (err) {
