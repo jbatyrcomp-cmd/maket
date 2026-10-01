@@ -1,39 +1,35 @@
 /*
  ======================================================================================
-   CISCO PACKET TRACER PHYSICAL PROTOTYPE - ESP32 INTERNET EDITION
-   WS2812B LED Controller + Direct Vercel Cloud Polling + Local WebServer
+   CISCO PACKET TRACER PHYSICAL PROTOTYPE - STANDALONE MASTER FIRMWARE
+   WS2812B NeoPixel LED Strip Controller + Built-in Web Server + Hardware Setup
  ======================================================================================
-   Xususiyatlari:
-   1. Telefon Wi-Fi tarmog'iga ulanish:
-      - SSID: "Xiaomi 12 Lite"
-      - Parol: "insurgent"
-      - Zaxira Wi-Fi AP: "Cisco_Maket_AP" (192.168.4.1)
-   2. To'g'ridan-to'g'ri Vercel Bulutiga ulanish:
-      - Har 1 soniyada https://maket-lovat.vercel.app/api/packets dan paketlarni o'zi oladi!
-      - Hech qanday admin ko'prigi shart emas — maket to'liq avtonom ishlaydi!
-   3. Mahalliy WebServer API (/sendWan, /clear, /testLed, /testAll, /getConfig, /saveConfig)
+   Ishlash tartibi:
+   1. ESP32 o'zining shaxsiy Wi-Fi tarmog'ini ochadi:
+      - SSID: Cisco_Maket_AP
+      - Parol: 12345678
+      - Manzil: http://192.168.4.1 (yoki avtomatik ochiladi)
+   2. Shuningdek, telefon Wi-Fi tarmog'iga ham ulanadi (Xiaomi 12 Lite / insurgent)
+   3. Web-sahifa to'liq ESP32 ichida joylashgan:
+      - Hech qanday tashqi internet shart emas!
+      - 0 ms kechikish: Tugma bosilishi bilan optik nur darhol lentada yuguradi!
+      - Klient sahifasi + Paket yuborish + Har bir LEDni tekshirish + NVS Sozlamalari!
  ======================================================================================
 */
 
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <HTTPClient.h>
+#include <DNSServer.h>
 #include <WebServer.h>
 #include <Preferences.h>
 #include <Adafruit_NeoPixel.h>
 
-// 1. Wi-Fi STA sozlamalari (Telefon Hotspoti)
-const char *sta_ssid = "Xiaomi 12 Lite";
-const char *sta_password = "insurgent";
-
-// 2. Wi-Fi AP sozlamalari (Zaxira ulanish)
+// Wi-Fi Access Point sozlamalari
 const char *ap_ssid = "Cisco_Maket_AP";
 const char *ap_password = "12345678";
 
-// 3. Vercel Bulut manzili
-const char *vercel_url = "https://maket-lovat.vercel.app/api/packets";
+// Qo'shimcha Wi-Fi (telefon hotspoti)
+const char *sta_ssid = "Xiaomi 12 Lite";
+const char *sta_password = "insurgent";
 
-// Standart parametrlar
 #define DEFAULT_PIN 4
 #define DEFAULT_TOTAL_LEDS 60
 #define DEFAULT_BRIGHTNESS 120
@@ -56,34 +52,299 @@ struct Config {
 
 Preferences prefs;
 WebServer server(80);
+DNSServer dnsServer;
 Adafruit_NeoPixel *strip = nullptr;
 
-unsigned long lastCloudCheck = 0;
-const unsigned long CLOUD_INTERVAL = 1000; // Har 1 soniyada Vercelni tekshirish
+// ======================================================================================
+// O'RNATILGAN VEB-INTERFEYS (HTML, CSS, JS TO'LIQ ESP32 XOTIRASIDA)
+// ======================================================================================
+const char PAGE_INDEX[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Cisco Optical Maket Controller</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
+    body { background: #080c14; color: #f1f5f9; padding: 12px; }
+    .header { text-align: center; padding: 14px 0; border-bottom: 1px solid #1e293b; margin-bottom: 16px; }
+    .header h1 { font-size: 19px; color: #00ffcc; letter-spacing: 1px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .header p { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+    .card { background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; padding: 14px; margin-bottom: 14px; box-shadow: 0 4px 15px rgba(0,0,0,0.4); }
+    .card-title { font-size: 13px; font-weight: bold; color: #38bdf8; text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
+    .form-group { margin-bottom: 12px; }
+    label { display: block; font-size: 11px; color: #cbd5e1; margin-bottom: 5px; font-weight: 600; text-transform: uppercase; }
+    input[type="text"], input[type="number"], select { width: 100%; background: #020617; border: 1px solid #334155; border-radius: 9px; padding: 10px; color: #fff; font-size: 14px; outline: none; }
+    input:focus, select:focus { border-color: #00ffcc; }
+    .color-row { display: flex; gap: 8px; align-items: center; }
+    .color-btn { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+    .color-btn.active { border-color: #fff; transform: scale(1.1); box-shadow: 0 0 10px rgba(255,255,255,0.5); }
+    .send-btn { width: 100%; background: linear-gradient(135deg, #00ffcc 0%, #0284c7 100%); color: #020617; font-size: 15px; font-weight: bold; padding: 13px; border: none; border-radius: 11px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 0 15px rgba(0,255,204,0.3); transition: all 0.2s; }
+    .send-btn:active { transform: scale(0.97); }
+    .btn-row { display: flex; gap: 8px; }
+    .btn-sub { flex: 1; padding: 9px; background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; font-size: 11px; font-weight: bold; cursor: pointer; text-align: center; }
+    .btn-sub:hover, .btn-sub:active { background: #334155; }
+    .status-box { background: #022c22; border: 1px solid #059669; color: #6ee7b7; padding: 10px; border-radius: 9px; font-size: 12px; margin-top: 10px; display: none; }
+    .grid-leds { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; max-height: 120px; overflow-y: auto; background: #020617; padding: 6px; border-radius: 8px; border: 1px solid #1e293b; }
+    .grid-leds button { background: #0f172a; border: 1px solid #334155; color: #94a3b8; font-size: 9px; padding: 5px 0; border-radius: 4px; cursor: pointer; }
+    .grid-leds button.active { background: #00ffcc; color: #000; font-weight: bold; border-color: #fff; }
+    .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+    .tab { flex: 1; padding: 9px; background: #1e293b; color: #94a3b8; border: none; border-radius: 8px; font-size: 12px; font-weight: bold; cursor: pointer; text-align: center; }
+    .tab.active { background: #0284c7; color: #fff; }
+    .range-row { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #94a3b8; margin-bottom: 6px; }
+    .range-inputs { display: flex; gap: 6px; align-items: center; }
+    .range-inputs input { width: 55px; padding: 5px; text-align: center; }
+  </style>
+</head>
+<body>
 
-// Rang yordamchi funksiyasi (HEX string -> uint32_t)
+  <div class="header">
+    <h1>⚡ CISCO OPTICAL PROTOTYPE</h1>
+    <p>ESP32 Standalone Web Controller &bull; Kechikish: 0ms</p>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('tabSend')">🚀 Paket Yuborish</button>
+    <button class="tab" onclick="switchTab('tabInspect')">🔬 LED Sinov</button>
+    <button class="tab" onclick="switchTab('tabSetup')">⚙️ Sozlamalar</button>
+  </div>
+
+  <!-- TAB 1: PAKET YUBORISH -->
+  <div id="tabSend">
+    <div class="card">
+      <div class="card-title">Optik Paket Parametrlari</div>
+      
+      <div class="form-group">
+        <label>Yuboruvchi Ismi / Tuxallusi:</label>
+        <input type="text" id="senderName" value="Talaba-Admin" placeholder="Ismingizni yozing">
+      </div>
+
+      <div class="form-group">
+        <label>Qabul Qiluvchi Qurilma (Target IP):</label>
+        <select id="targetSelect">
+          <option value="PC1">💻 PC1 (192.168.1.10)</option>
+          <option value="PC2">💻 PC2 (192.168.1.20)</option>
+          <option value="Server0">🖥️ Server0 (192.168.1.100)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Optik Nur Rangi:</label>
+        <div class="color-row">
+          <div class="color-btn active" style="background:#00ffcc" onclick="pickColor('#00ffcc', this)"></div>
+          <div class="color-btn" style="background:#00ff66" onclick="pickColor('#00ff66', this)"></div>
+          <div class="color-btn" style="background:#0088ff" onclick="pickColor('#0088ff', this)"></div>
+          <div class="color-btn" style="background:#ff007f" onclick="pickColor('#ff007f', this)"></div>
+          <div class="color-btn" style="background:#ffaa00" onclick="pickColor('#ffaa00', this)"></div>
+          <input type="color" id="customColor" value="#00ffcc" style="width:34px; height:34px; border:none; background:transparent; cursor:pointer;" onchange="pickColor(this.value)">
+        </div>
+      </div>
+
+      <button class="send-btn" onclick="sendOpticalPacket()">Optik Toladan Yuborish ➔</button>
+
+      <div id="statusBox" class="status-box"></div>
+    </div>
+  </div>
+
+  <!-- TAB 2: LED INSPECTOR -->
+  <div id="tabInspect" style="display:none;">
+    <div class="card">
+      <div class="card-title">
+        <span>Har Bir LEDni Alohida Sinash</span>
+        <span id="inspectBadge" style="color:#00ffcc;">LED #0</span>
+      </div>
+
+      <div class="btn-row" style="margin-bottom:10px;">
+        <button class="btn-sub" onclick="stepLed(-1)">◀ Oldingi</button>
+        <button class="btn-sub" style="background:#0284c7;" onclick="stepLed(1)">Keyingi ▶</button>
+        <button class="btn-sub" id="sweepBtn" style="background:#7c3aed;" onclick="toggleAutoSweep()">🔄 Avto-Skan</button>
+      </div>
+
+      <div class="btn-row" style="margin-bottom:12px;">
+        <button class="btn-sub" style="background:#854d0e;" onclick="testAllOn()">💡 Barchasini Yoqish (All ON)</button>
+        <button class="btn-sub" onclick="clearLeds()">⚫ O'chirish</button>
+      </div>
+
+      <label style="margin-top:10px;">Lenta Xaritasi (Bosib yoqing):</label>
+      <div id="ledGrid" class="grid-leds"></div>
+    </div>
+  </div>
+
+  <!-- TAB 3: SETUP -->
+  <div id="tabSetup" style="display:none;">
+    <div class="card">
+      <div class="card-title">Plata va Segmentlar Sozlamalari</div>
+      
+      <div class="form-group">
+        <label>LED Data Pini (GPIO):</label>
+        <select id="cfgPin">
+          <option value="4">GPIO 4 (D4)</option>
+          <option value="2">GPIO 2 (D2)</option>
+          <option value="5">GPIO 5 (D5)</option>
+          <option value="18">GPIO 18 (D18)</option>
+          <option value="19">GPIO 19 (D19)</option>
+          <option value="23">GPIO 23 (D23)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Jami LED Soni:</label>
+        <input type="number" id="cfgTotal" value="60">
+      </div>
+
+      <div class="form-group">
+        <label>Yorqinlik (10 - 255):</label>
+        <input type="number" id="cfgBrightness" value="120" min="10" max="255">
+      </div>
+
+      <div class="range-row"><span>WAN (Optik Tola):</span><div class="range-inputs"><input type="number" id="wan_s" value="0">-<input type="number" id="wan_e" value="11"></div></div>
+      <div class="range-row"><span>Router ➔ Switch:</span><div class="range-inputs"><input type="number" id="r_sw_s" value="12">-<input type="number" id="r_sw_e" value="19"></div></div>
+      <div class="range-row"><span>Switch ➔ PC1:</span><div class="range-inputs"><input type="number" id="pc1_s" value="20">-<input type="number" id="pc1_e" value="31"></div></div>
+      <div class="range-row"><span>Switch ➔ PC2:</span><div class="range-inputs"><input type="number" id="pc2_s" value="32">-<input type="number" id="pc2_e" value="43"></div></div>
+      <div class="range-row"><span>Switch ➔ Server:</span><div class="range-inputs"><input type="number" id="srv_s" value="44">-<input type="number" id="srv_e" value="55"></div></div>
+
+      <button class="send-btn" style="margin-top:12px; background:#059669;" onclick="saveConfig()">Xotiraga Saqlash (Save NVS)</button>
+    </div>
+  </div>
+
+  <script>
+    let selectedColor = '#00ffcc';
+    let currentLed = 0;
+    let totalLeds = 60;
+    let sweepTimer = null;
+
+    function switchTab(id) {
+      document.getElementById('tabSend').style.display = (id === 'tabSend') ? 'block' : 'none';
+      document.getElementById('tabInspect').style.display = (id === 'tabInspect') ? 'block' : 'none';
+      document.getElementById('tabSetup').style.display = (id === 'tabSetup') ? 'block' : 'none';
+      const tabs = document.querySelectorAll('.tab');
+      tabs.forEach((t, i) => {
+        t.className = (['tabSend','tabInspect','tabSetup'][i] === id) ? 'tab active' : 'tab';
+      });
+      if (id === 'tabInspect') buildGrid();
+    }
+
+    function pickColor(color, el) {
+      selectedColor = color;
+      if (el) {
+        document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+        el.classList.add('active');
+      }
+    }
+
+    function sendOpticalPacket() {
+      const sender = document.getElementById('senderName').value || 'Talaba';
+      const target = document.getElementById('targetSelect').value;
+      const statusBox = document.getElementById('statusBox');
+
+      statusBox.style.display = 'block';
+      statusBox.innerHTML = `⚡ <strong>${sender}</strong> tomonidan <strong>${target}</strong> ga nur yuborildi!`;
+
+      fetch(`/sendWan?target=${target}&color=${encodeURIComponent(selectedColor)}`)
+        .then(r => r.json())
+        .catch(() => {});
+    }
+
+    function buildGrid() {
+      const grid = document.getElementById('ledGrid');
+      grid.innerHTML = '';
+      for (let i = 0; i < totalLeds; i++) {
+        const btn = document.createElement('button');
+        btn.textContent = i;
+        btn.className = (i === currentLed) ? 'active' : '';
+        btn.onclick = () => { currentLed = i; sendSingleLed(i); };
+        grid.appendChild(btn);
+      }
+    }
+
+    function sendSingleLed(idx) {
+      document.getElementById('inspectBadge').textContent = 'LED #' + idx;
+      buildGrid();
+      fetch(`/testLed?index=${idx}&color=${encodeURIComponent(selectedColor)}`);
+    }
+
+    function stepLed(dir) {
+      currentLed += dir;
+      if (currentLed < 0) currentLed = totalLeds - 1;
+      if (currentLed >= totalLeds) currentLed = 0;
+      sendSingleLed(currentLed);
+    }
+
+    function toggleAutoSweep() {
+      const btn = document.getElementById('sweepBtn');
+      if (sweepTimer) {
+        clearInterval(sweepTimer);
+        sweepTimer = null;
+        btn.textContent = '🔄 Avto-Skan';
+        btn.style.background = '#7c3aed';
+      } else {
+        btn.textContent = '⏹ To\'xtatish';
+        btn.style.background = '#e11d48';
+        sweepTimer = setInterval(() => { stepLed(1); }, 150);
+      }
+    }
+
+    function testAllOn() {
+      fetch(`/testAll?color=${encodeURIComponent(selectedColor)}`);
+    }
+
+    function clearLeds() {
+      fetch('/clear');
+    }
+
+    function saveConfig() {
+      const p = new URLSearchParams({
+        pin: document.getElementById('cfgPin').value,
+        total: document.getElementById('cfgTotal').value,
+        brightness: document.getElementById('cfgBrightness').value,
+        wan_start: document.getElementById('wan_s').value,
+        wan_end: document.getElementById('wan_e').value,
+        r_sw_start: document.getElementById('r_sw_s').value,
+        r_sw_end: document.getElementById('r_sw_e').value,
+        pc1_start: document.getElementById('pc1_s').value,
+        pc1_end: document.getElementById('pc1_e').value,
+        pc2_start: document.getElementById('pc2_s').value,
+        pc2_end: document.getElementById('pc2_e').value,
+        srv_start: document.getElementById('srv_s').value,
+        srv_end: document.getElementById('srv_e').value
+      });
+      fetch(`/saveConfig?${p.toString()}`)
+        .then(() => alert('Sozlamalar saqlandi!'));
+    }
+
+    // Yuklanganda sozlamalarni ESP32 dan olish
+    fetch('/getConfig')
+      .then(r => r.json())
+      .then(cfg => {
+        if (cfg.pin) document.getElementById('cfgPin').value = cfg.pin;
+        if (cfg.total) { totalLeds = cfg.total; document.getElementById('cfgTotal').value = cfg.total; }
+        if (cfg.brightness) document.getElementById('cfgBrightness').value = cfg.brightness;
+      }).catch(() => {});
+  </script>
+</body>
+</html>
+)rawliteral";
+
+// ======================================================================================
+// YORDAMCHI FUNKSIYALAR
+// ======================================================================================
+
 uint32_t parseHexColor(String hex) {
   hex.replace("#", "");
   hex.replace("%23", "");
   hex.trim();
-  if (hex.length() < 6) {
-    return strip->Color(0, 255, 204); // Default Cyan
-  }
-  long number = strtol(hex.c_str(), NULL, 16);
-  byte r = (number >> 16) & 0xFF;
-  byte g = (number >> 8) & 0xFF;
-  byte b = number & 0xFF;
-  if (r == 0 && g == 0 && b == 0) {
-    return strip->Color(0, 255, 204);
-  }
+  if (hex.length() < 6) return strip->Color(0, 255, 204);
+  long num = strtol(hex.c_str(), NULL, 16);
+  byte r = (num >> 16) & 0xFF;
+  byte g = (num >> 8) & 0xFF;
+  byte b = num & 0xFF;
+  if (r == 0 && g == 0 && b == 0) return strip->Color(0, 255, 204);
   return strip->Color(r, g, b);
 }
 
-// LED lentani initsializatsiya qilish
 void initStrip() {
-  if (strip != nullptr) {
-    delete strip;
-  }
+  if (strip != nullptr) delete strip;
   strip = new Adafruit_NeoPixel(cfg.total, cfg.pin, NEO_GRB + NEO_KHZ800);
   strip->begin();
   strip->setBrightness(cfg.brightness);
@@ -91,7 +352,6 @@ void initStrip() {
   strip->show();
 }
 
-// NVS sozlamalarini yuklash
 void loadPreferences() {
   prefs.begin("cisco_cfg", true);
   cfg.pin = prefs.getInt("pin", DEFAULT_PIN);
@@ -110,7 +370,6 @@ void loadPreferences() {
   prefs.end();
 }
 
-// NVS ga saqlash
 void savePreferences() {
   prefs.begin("cisco_cfg", false);
   prefs.putInt("pin", cfg.pin);
@@ -129,48 +388,33 @@ void savePreferences() {
   prefs.end();
 }
 
-void sendCorsHeader() {
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
-}
-
-// Lenta segmenti bo'ylab nur o'tishi
 void animateSegment(int start, int end, uint32_t color, int delayMs = 30) {
   int step = (start <= end) ? 1 : -1;
-  int current = start;
-
+  int cur = start;
   while (true) {
-    strip->setPixelColor(current, color);
+    strip->setPixelColor(cur, color);
     strip->show();
     delay(delayMs);
-    strip->setPixelColor(current, 0);
+    strip->setPixelColor(cur, 0);
     strip->show();
-
-    if (current == end) break;
-    current += step;
+    if (cur == end) break;
+    cur += step;
   }
 }
 
-// Monitor LEDlari miltillashi
-void blinkMonitor(int monitorStart, int monitorEnd, uint32_t color, int blinks = 3) {
+void blinkMonitor(int start, int end, uint32_t color, int blinks = 3) {
   for (int b = 0; b < blinks; b++) {
-    for (int i = monitorStart; i <= monitorEnd; i++) {
-      strip->setPixelColor(i, color);
-    }
+    for (int i = start; i <= end; i++) strip->setPixelColor(i, color);
     strip->show();
     delay(100);
-    for (int i = monitorStart; i <= monitorEnd; i++) {
-      strip->setPixelColor(i, 0);
-    }
+    for (int i = start; i <= end; i++) strip->setPixelColor(i, 0);
     strip->show();
     delay(100);
   }
 }
 
-// Paket harakatini lentada to'liq ko'rsatish
 void triggerPacketAnimation(String target, uint32_t color) {
-  Serial.printf("\n⚡ [OPTICAL PULSE] Target: %s, Color: %X\n", target.c_str(), color);
+  Serial.printf("\n⚡ [NUR HARAKATI] Target: %s\n", target.c_str());
 
   // 1. WAN Optik kabel
   animateSegment(cfg.wan_start, cfg.wan_end, color, 25);
@@ -178,24 +422,23 @@ void triggerPacketAnimation(String target, uint32_t color) {
   // 2. Router -> Switch
   animateSegment(cfg.r_sw_start, cfg.r_sw_end, color, 25);
 
-  // 3. Switch -> Target qurilma
+  // 3. Switch -> Target
   if (target.indexOf("PC1") >= 0) {
-    int monStart = max(cfg.pc1_start, cfg.pc1_end - 5);
-    animateSegment(cfg.pc1_start, monStart - 1, color, 25);
-    blinkMonitor(monStart, cfg.pc1_end, color, 4);
+    int mon = max(cfg.pc1_start, cfg.pc1_end - 5);
+    animateSegment(cfg.pc1_start, mon - 1, color, 25);
+    blinkMonitor(mon, cfg.pc1_end, color, 4);
   } else if (target.indexOf("PC2") >= 0) {
-    int monStart = max(cfg.pc2_start, cfg.pc2_end - 5);
-    animateSegment(cfg.pc2_start, monStart - 1, color, 25);
-    blinkMonitor(monStart, cfg.pc2_end, color, 4);
+    int mon = max(cfg.pc2_start, cfg.pc2_end - 5);
+    animateSegment(cfg.pc2_start, mon - 1, color, 25);
+    blinkMonitor(mon, cfg.pc2_end, color, 4);
   } else if (target.indexOf("Server") >= 0) {
-    int monStart = max(cfg.srv_start, cfg.srv_end - 5);
-    animateSegment(cfg.srv_start, monStart - 1, color, 25);
-    blinkMonitor(monStart, cfg.srv_end, color, 4);
+    int mon = max(cfg.srv_start, cfg.srv_end - 5);
+    animateSegment(cfg.srv_start, mon - 1, color, 25);
+    blinkMonitor(mon, cfg.srv_end, color, 4);
   } else {
-    // Standart PC1
-    int monStart = max(cfg.pc1_start, cfg.pc1_end - 5);
-    animateSegment(cfg.pc1_start, monStart - 1, color, 25);
-    blinkMonitor(monStart, cfg.pc1_end, color, 3);
+    int mon = max(cfg.pc1_start, cfg.pc1_end - 5);
+    animateSegment(cfg.pc1_start, mon - 1, color, 25);
+    blinkMonitor(mon, cfg.pc1_end, color, 3);
   }
 
   strip->clear();
@@ -203,80 +446,15 @@ void triggerPacketAnimation(String target, uint32_t color) {
 }
 
 // ======================================================================================
-// VERCEL BULUTIDAN TO'G'RIDAN-TO'G'RI O'QISH (Cloud Polling)
+// SERVER HANDLERS
 // ======================================================================================
-void checkVercelQueue() {
-  if (WiFi.status() != WL_CONNECTED) {
-    return; // Internetga ulanmagan bo'lsa kutamiz
-  }
-
-  WiFiClientSecure client;
-  client.setInsecure(); // SSL sertifikat tekshiruvini bypass qilish (tezkor)
-  HTTPClient https;
-
-  if (https.begin(client, vercel_url)) {
-    https.setTimeout(3000);
-    int httpCode = https.GET();
-
-    if (httpCode == HTTP_CODE_OK) {
-      String payload = https.getString();
-
-      // Agar javobda paketlar mavjud bo'lsa
-      if (payload.indexOf("\"count\":0") == -1 && payload.indexOf("\"packets\":[") >= 0) {
-        Serial.println("\n🌐 [VERCEL CLOUD] Yangi paket qabul qilindi!");
-        Serial.println(payload);
-
-        // Oddiy JSON parsing (qurilma va rangni topish)
-        int targetIdx = payload.indexOf("\"target\":\"");
-        int colorIdx = payload.indexOf("\"color\":\"");
-
-        String target = "PC1";
-        String colorHex = "#00ffcc";
-
-        if (targetIdx >= 0) {
-          int start = targetIdx + 10;
-          int end = payload.indexOf("\"", start);
-          if (end > start) target = payload.substring(start, end);
-        }
-
-        if (colorIdx >= 0) {
-          int start = colorIdx + 9;
-          int end = payload.indexOf("\"", start);
-          if (end > start) colorHex = payload.substring(start, end);
-        }
-
-        uint32_t color = parseHexColor(colorHex);
-        triggerPacketAnimation(target, color);
-      }
-    } else {
-      // Har soniya ekranni to'ldirmaslik uchun faqat jiddiy xato bo'lsa
-      static unsigned long lastErr = 0;
-      if (millis() - lastErr > 5000) {
-        lastErr = millis();
-        Serial.printf("[CLOUD-STATUS] HTTP Code: %d (%s)\n", httpCode, https.errorToString(httpCode).c_str());
-      }
-    }
-    https.end();
-  }
-}
-
-// ======================================================================================
-// WEBSERVER HANDLERS
-// ======================================================================================
-void handlePing() {
-  sendCorsHeader();
-  server.send(200, "text/plain", "PONG");
-}
-
-void handleClear() {
-  sendCorsHeader();
-  strip->clear();
-  strip->show();
-  server.send(200, "application/json", "{\"success\":true}");
+void handleRoot() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send_P(200, "text/html", PAGE_INDEX);
 }
 
 void handleSendWan() {
-  sendCorsHeader();
+  server.sendHeader("Access-Control-Allow-Origin", "*");
   String target = server.hasArg("target") ? server.arg("target") : "PC1";
   String colorHex = server.hasArg("color") ? server.arg("color") : "#00ffcc";
   uint32_t color = parseHexColor(colorHex);
@@ -286,35 +464,40 @@ void handleSendWan() {
 }
 
 void handleTestLed() {
-  sendCorsHeader();
-  int index = server.hasArg("index") ? server.arg("index").toInt() : 0;
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  int idx = server.hasArg("index") ? server.arg("index").toInt() : 0;
   String colorHex = server.hasArg("color") ? server.arg("color") : "#00ffcc";
   uint32_t color = parseHexColor(colorHex);
 
-  if (index >= 0 && index < cfg.total) {
+  if (idx >= 0 && idx < cfg.total) {
     strip->clear();
-    strip->setPixelColor(index, color);
+    strip->setPixelColor(idx, color);
     strip->show();
-    Serial.printf("[TEST-LED] LED #%d yondi (%s)\n", index, colorHex.c_str());
+    Serial.printf("[TEST] LED #%d yondi\n", idx);
   }
-  server.send(200, "application/json", "{\"success\":true,\"index\":" + String(index) + "}");
+  server.send(200, "application/json", "{\"success\":true,\"index\":" + String(idx) + "}");
 }
 
 void handleTestAll() {
-  sendCorsHeader();
+  server.sendHeader("Access-Control-Allow-Origin", "*");
   String colorHex = server.hasArg("color") ? server.arg("color") : "#ffffff";
   uint32_t color = parseHexColor(colorHex);
 
-  for (int i = 0; i < cfg.total; i++) {
-    strip->setPixelColor(i, color);
-  }
+  for (int i = 0; i < cfg.total; i++) strip->setPixelColor(i, color);
   strip->show();
-  Serial.printf("[TEST-ALL] Barcha %d ta LED yondi\n", cfg.total);
+  Serial.println("[TEST-ALL] Barcha LEDlar yondi!");
+  server.send(200, "application/json", "{\"success\":true}");
+}
+
+void handleClear() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  strip->clear();
+  strip->show();
   server.send(200, "application/json", "{\"success\":true}");
 }
 
 void handleGetConfig() {
-  sendCorsHeader();
+  server.sendHeader("Access-Control-Allow-Origin", "*");
   String json = "{";
   json += "\"pin\":" + String(cfg.pin) + ",";
   json += "\"total\":" + String(cfg.total) + ",";
@@ -328,15 +511,13 @@ void handleGetConfig() {
   json += "\"pc2_start\":" + String(cfg.pc2_start) + ",";
   json += "\"pc2_end\":" + String(cfg.pc2_end) + ",";
   json += "\"srv_start\":" + String(cfg.srv_start) + ",";
-  json += "\"srv_end\":" + String(cfg.srv_end) + ",";
-  json += "\"wifi_connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
-  json += "\"ip\":\"" + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString()) + "\"";
+  json += "\"srv_end\":" + String(cfg.srv_end);
   json += "}";
   server.send(200, "application/json", json);
 }
 
 void handleSaveConfig() {
-  sendCorsHeader();
+  server.sendHeader("Access-Control-Allow-Origin", "*");
   if (server.hasArg("pin")) cfg.pin = server.arg("pin").toInt();
   if (server.hasArg("total")) cfg.total = server.arg("total").toInt();
   if (server.hasArg("brightness")) cfg.brightness = server.arg("brightness").toInt();
@@ -363,78 +544,71 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
-  Serial.println("\n--- Cisco Packet Tracer Physical Prototype (Internet Edition) ---");
+  Serial.println("\n--- Cisco Packet Tracer Standalone Master Controller ---");
   loadPreferences();
   initStrip();
 
-  // Boshlang'ich test (chiroqlar 0.5 soniya yonib o'chadi)
-  for (int i = 0; i < cfg.total; i++) {
-    strip->setPixelColor(i, strip->Color(0, 255, 204));
-  }
+  // Boshlang'ich test: butun lenta zangori yonib o'chadi
+  for (int i = 0; i < cfg.total; i++) strip->setPixelColor(i, strip->Color(0, 255, 204));
   strip->show();
   delay(500);
   strip->clear();
   strip->show();
 
-  // 1. Dual Wi-Fi rejimini yoqish (ham telefon Hotspotiga ulanadi, ham zaxira AP ochadi)
+  // 1. Dual Wi-Fi rejimini yoqish
   WiFi.mode(WIFI_AP_STA);
 
-  // Zaxira AP ochish
+  // AP Wi-Fi ochish (har doim kafolatli ishlaydi!)
+  IPAddress local_ip(192, 168, 4, 1);
+  IPAddress gateway(192, 168, 4, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  WiFi.softAPConfig(local_ip, gateway, subnet);
   WiFi.softAP(ap_ssid, ap_password);
-  Serial.print("Zaxira Wi-Fi AP: ");
+
+  Serial.println("\n========================================================");
+  Serial.print("✅ ESP32 Wi-Fi AP ochildi: ");
   Serial.println(ap_ssid);
-  Serial.print("AP IP: ");
-  Serial.println(WiFi.softAPIP());
+  Serial.println("🌐 Sayt manzili: http://192.168.4.1");
+  Serial.println("========================================================\n");
 
-  // Telefon Hotspotiga ("Xiaomi 12 Lite") ulanish
-  Serial.printf("Internetga ulanilmoqda: '%s'...\n", sta_ssid);
+  // Captive Portal DNS server (har qanday so'rovni 192.168.4.1 ga yo'naltirish)
+  dnsServer.start(53, "*", local_ip);
+
+  // Telefon hotspoti bo'lsa unga ham ulanish
   WiFi.begin(sta_ssid, sta_password);
-
-  int tries = 0;
-  while (WiFi.status() != WL_CONNECTED && tries < 15) {
-    delay(500);
-    Serial.print(".");
-    tries++;
+  int t = 0;
+  while (WiFi.status() != WL_CONNECTED && t < 6) {
+    delay(400);
+    t++;
   }
-
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✅ INTERNETGA MUVAFFAQIYATLI ULANDI!");
-    Serial.print("ESP32 Lokal IP: ");
+    Serial.print("✅ Telefon Hotspotiga ulandi! IP: ");
     Serial.println(WiFi.localIP());
-    // Muvaffaqiyatli ulanish belgisi: 3 ta yashil chiroq yonadi
-    blinkMonitor(0, min(5, cfg.total - 1), strip->Color(0, 255, 0), 2);
-  } else {
-    Serial.println("\n⚠️ Telefon Hotspotiga ulanib bo'lmadi. Telefoningizda 'Точка доступа' yoqilganligini tekshiring.");
   }
 
   // WebServer marshrutlari
-  server.on("/ping", HTTP_GET, handlePing);
-  server.on("/clear", HTTP_GET, handleClear);
+  server.on("/", HTTP_GET, handleRoot);
   server.on("/sendWan", HTTP_GET, handleSendWan);
   server.on("/testLed", HTTP_GET, handleTestLed);
   server.on("/testAll", HTTP_GET, handleTestAll);
+  server.on("/clear", HTTP_GET, handleClear);
   server.on("/getConfig", HTTP_GET, handleGetConfig);
   server.on("/saveConfig", HTTP_GET, handleSaveConfig);
 
+  // Android va iPhone uchun Captive Portal avto-yo'naltirish
+  server.on("/generate_204", HTTP_GET, handleRoot);
+  server.on("/hotspot-detect.html", HTTP_GET, handleRoot);
+
   server.onNotFound([]() {
-    if (server.method() == HTTP_OPTIONS) {
-      sendCorsHeader();
-      server.send(200);
-    } else {
-      server.send(404, "text/plain", "Not Found");
-    }
+    server.sendHeader("Location", "http://192.168.4.1/", true);
+    server.send(302, "text/plain", "");
   });
 
   server.begin();
-  Serial.println("WebServer faol!");
+  Serial.println("🚀 WebServer muvaffaqiyatli ishga tushdi!");
 }
 
 void loop() {
+  dnsServer.processNextRequest();
   server.handleClient();
-
-  // Har 1 soniyada Vercel bulut navbatini to'g'ridan-to'g'ri tekshirish
-  if (millis() - lastCloudCheck >= CLOUD_INTERVAL) {
-    lastCloudCheck = millis();
-    checkVercelQueue();
-  }
 }
