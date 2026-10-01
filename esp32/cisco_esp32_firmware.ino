@@ -52,12 +52,19 @@ Adafruit_NeoPixel *strip = nullptr;
 
 // Rang yordamchi funksiyasi (HEX string -> uint32_t)
 uint32_t parseHexColor(String hex) {
-  if (hex.startsWith("#")) hex = hex.substring(1);
-  if (hex.startsWith("%23")) hex = hex.substring(3);
+  hex.replace("#", "");
+  hex.replace("%23", "");
+  hex.trim();
+  if (hex.length() < 6) {
+    return strip->Color(0, 255, 204); // Xatolik bo'lsa standart yorqin Cyan
+  }
   long number = strtol(hex.c_str(), NULL, 16);
   byte r = (number >> 16) & 0xFF;
   byte g = (number >> 8) & 0xFF;
   byte b = number & 0xFF;
+  if (r == 0 && g == 0 && b == 0) {
+    return strip->Color(0, 255, 204);
+  }
   return strip->Color(r, g, b);
 }
 
@@ -175,6 +182,8 @@ void handleSendWan() {
   String target = server.hasArg("target") ? server.arg("target") : "PC1";
   String colorHex = server.hasArg("color") ? server.arg("color") : "#00ffcc";
   uint32_t color = parseHexColor(colorHex);
+
+  Serial.printf("\n[BUYRUQ KELDI] /sendWan: Target=%s, Color=%s\n", target.c_str(), colorHex.c_str());
 
   // Darhol javob qaytaramiz (brauzer kutib qolmasligi uchun)
   server.send(200, "application/json", "{\"success\":true,\"target\":\"" + target + "\"}");
@@ -295,9 +304,17 @@ void setup() {
 
   server.begin();
   Serial.println("HTTP WebServer ishga tushdi!");
+  Serial.printf("LED Pin: GPIO %d, Jami LED: %d, Yorqinlik: %d\n", cfg.pin, cfg.total, cfg.brightness);
 
-  // Boshlang'ich self-test (yashil chiroq qisqa yonib o'chadi)
-  blinkMonitor(0, min(5, cfg.total - 1), strip->Color(0, 255, 100), 2);
+  // Boshlang'ich TEST: Butun lenta 500ms ga chiroyli zangori yonib o'chadi
+  for (int i = 0; i < cfg.total; i++) {
+    strip->setPixelColor(i, strip->Color(0, 255, 204));
+  }
+  strip->show();
+  delay(600);
+  strip->clear();
+  strip->show();
+  Serial.println("Lenta self-test yakunlandi. ESP32 paket kutmoqda...");
 }
 
 void loop() {
