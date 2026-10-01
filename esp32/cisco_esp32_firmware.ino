@@ -1,35 +1,43 @@
 /*
  ======================================================================================
-   CISCO PACKET TRACER PHYSICAL PROTOTYPE - ESP32 FIRMWARE
-   WS2812B / NeoPixel LED Strip Controller + WebServer
+   CISCO PACKET TRACER PHYSICAL PROTOTYPE - ESP32 INTERNET EDITION
+   WS2812B LED Controller + Direct Vercel Cloud Polling + Local WebServer
  ======================================================================================
    Xususiyatlari:
-   - Wi-Fi Access Point (SSID: Cisco_Maket_AP, IP: 192.168.4.1)
-   - WebServer API:
-       * GET /sendWan?target=PC1&color=%2300ffcc -> Paket animatsiyasi
-       * GET /clear                              -> Lentani tozalash
-       * GET /ping                               -> Aloqani tekshirish
-       * GET /getConfig                          -> NVS sozlamalarini JSON qaytarish
-       * GET /saveConfig?...                     -> Sozlamalarni NVS ga saqlash
-   - NVS (Preferences) orqali dinamik sozlanadigan GPIO pin, yorqinlik va segmentlar
+   1. Telefon Wi-Fi tarmog'iga ulanish:
+      - SSID: "Xiaomi 12 Lite"
+      - Parol: "insurgent"
+      - Zaxira Wi-Fi AP: "Cisco_Maket_AP" (192.168.4.1)
+   2. To'g'ridan-to'g'ri Vercel Bulutiga ulanish:
+      - Har 1 soniyada https://maket-lovat.vercel.app/api/packets dan paketlarni o'zi oladi!
+      - Hech qanday admin ko'prigi shart emas — maket to'liq avtonom ishlaydi!
+   3. Mahalliy WebServer API (/sendWan, /clear, /testLed, /testAll, /getConfig, /saveConfig)
  ======================================================================================
 */
 
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include <WebServer.h>
 #include <Preferences.h>
 #include <Adafruit_NeoPixel.h>
 
-// Wi-Fi Access Point sozlamalari
-const char *ssid = "Cisco_Maket_AP";
-const char *password = "12345678"; // kamida 8 ta belgi (yoki NULL ochiq qilish uchun)
+// 1. Wi-Fi STA sozlamalari (Telefon Hotspoti)
+const char *sta_ssid = "Xiaomi 12 Lite";
+const char *sta_password = "insurgent";
+
+// 2. Wi-Fi AP sozlamalari (Zaxira ulanish)
+const char *ap_ssid = "Cisco_Maket_AP";
+const char *ap_password = "12345678";
+
+// 3. Vercel Bulut manzili
+const char *vercel_url = "https://maket-lovat.vercel.app/api/packets";
 
 // Standart parametrlar
 #define DEFAULT_PIN 4
 #define DEFAULT_TOTAL_LEDS 60
 #define DEFAULT_BRIGHTNESS 120
 
-// Segment oraliqlari (standart)
 struct Config {
   int pin = DEFAULT_PIN;
   int total = DEFAULT_TOTAL_LEDS;
@@ -50,13 +58,16 @@ Preferences prefs;
 WebServer server(80);
 Adafruit_NeoPixel *strip = nullptr;
 
+unsigned long lastCloudCheck = 0;
+const unsigned long CLOUD_INTERVAL = 1000; // Har 1 soniyada Vercelni tekshirish
+
 // Rang yordamchi funksiyasi (HEX string -> uint32_t)
 uint32_t parseHexColor(String hex) {
   hex.replace("#", "");
   hex.replace("%23", "");
   hex.trim();
   if (hex.length() < 6) {
-    return strip->Color(0, 255, 204); // Xatolik bo'lsa standart yorqin Cyan
+    return strip->Color(0, 255, 204); // Default Cyan
   }
   long number = strtol(hex.c_str(), NULL, 16);
   byte r = (number >> 16) & 0xFF;
@@ -68,7 +79,7 @@ uint32_t parseHexColor(String hex) {
   return strip->Color(r, g, b);
 }
 
-// LED lentani qayta initsializatsiya qilish
+// LED lentani initsializatsiya qilish
 void initStrip() {
   if (strip != nullptr) {
     delete strip;
@@ -80,7 +91,7 @@ void initStrip() {
   strip->show();
 }
 
-// NVS xotirasidan sozlamalarni o'qish
+// NVS sozlamalarini yuklash
 void loadPreferences() {
   prefs.begin("cisco_cfg", true);
   cfg.pin = prefs.getInt("pin", DEFAULT_PIN);
@@ -99,7 +110,7 @@ void loadPreferences() {
   prefs.end();
 }
 
-// NVS xotirasiga sozlamalarni saqlash
+// NVS ga saqlash
 void savePreferences() {
   prefs.begin("cisco_cfg", false);
   prefs.putInt("pin", cfg.pin);
@@ -118,15 +129,14 @@ void savePreferences() {
   prefs.end();
 }
 
-// CORS javobini qo'shish
 void sendCorsHeader() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-// Bitta segment bo'ylab yorug'lik nurini (impuls) yurgizish animatsiyasi
-void animateSegment(int start, int end, uint32_t color, int delayMs = 35) {
+// Lenta segmenti bo'ylab nur o'tishi
+void animateSegment(int start, int end, uint32_t color, int delayMs = 30) {
   int step = (start <= end) ? 1 : -1;
   int current = start;
 
@@ -134,7 +144,7 @@ void animateSegment(int start, int end, uint32_t color, int delayMs = 35) {
     strip->setPixelColor(current, color);
     strip->show();
     delay(delayMs);
-    strip->setPixelColor(current, 0); // orqasidan o'chirish
+    strip->setPixelColor(current, 0);
     strip->show();
 
     if (current == end) break;
@@ -142,7 +152,7 @@ void animateSegment(int start, int end, uint32_t color, int delayMs = 35) {
   }
 }
 
-// Monitor LEDlarini miltillatish (Paket qabul qilindi effekti)
+// Monitor LEDlari miltillashi
 void blinkMonitor(int monitorStart, int monitorEnd, uint32_t color, int blinks = 3) {
   for (int b = 0; b < blinks; b++) {
     for (int i = monitorStart; i <= monitorEnd; i++) {
@@ -158,65 +168,116 @@ void blinkMonitor(int monitorStart, int monitorEnd, uint32_t color, int blinks =
   }
 }
 
-// ======================================================================================
-// SERVER HANDLERS
-// ======================================================================================
+// Paket harakatini lentada to'liq ko'rsatish
+void triggerPacketAnimation(String target, uint32_t color) {
+  Serial.printf("\n⚡ [OPTICAL PULSE] Target: %s, Color: %X\n", target.c_str(), color);
 
-// GET /ping
+  // 1. WAN Optik kabel
+  animateSegment(cfg.wan_start, cfg.wan_end, color, 25);
+
+  // 2. Router -> Switch
+  animateSegment(cfg.r_sw_start, cfg.r_sw_end, color, 25);
+
+  // 3. Switch -> Target qurilma
+  if (target.indexOf("PC1") >= 0) {
+    int monStart = max(cfg.pc1_start, cfg.pc1_end - 5);
+    animateSegment(cfg.pc1_start, monStart - 1, color, 25);
+    blinkMonitor(monStart, cfg.pc1_end, color, 4);
+  } else if (target.indexOf("PC2") >= 0) {
+    int monStart = max(cfg.pc2_start, cfg.pc2_end - 5);
+    animateSegment(cfg.pc2_start, monStart - 1, color, 25);
+    blinkMonitor(monStart, cfg.pc2_end, color, 4);
+  } else if (target.indexOf("Server") >= 0) {
+    int monStart = max(cfg.srv_start, cfg.srv_end - 5);
+    animateSegment(cfg.srv_start, monStart - 1, color, 25);
+    blinkMonitor(monStart, cfg.srv_end, color, 4);
+  } else {
+    // Standart PC1
+    int monStart = max(cfg.pc1_start, cfg.pc1_end - 5);
+    animateSegment(cfg.pc1_start, monStart - 1, color, 25);
+    blinkMonitor(monStart, cfg.pc1_end, color, 3);
+  }
+
+  strip->clear();
+  strip->show();
+}
+
+// ======================================================================================
+// VERCEL BULUTIDAN TO'G'RIDAN-TO'G'RI O'QISH (Cloud Polling)
+// ======================================================================================
+void checkVercelQueue() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return; // Internetga ulanmagan bo'lsa kutamiz
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure(); // SSL sertifikat tekshiruvini bypass qilish (tezkor)
+  HTTPClient https;
+
+  if (https.begin(client, vercel_url)) {
+    https.setTimeout(3000);
+    int httpCode = https.GET();
+
+    if (httpCode == HTTP_CODE_OK) {
+      String payload = https.getString();
+
+      // Agar javobda "packets" bo'lsa va count > 0 bo'lsa
+      if (payload.indexOf("\"count\":0") == -1 && payload.indexOf("\"packets\":[") >= 0) {
+        Serial.println("\n🌐 [VERCEL CLOUD] Yangi paket qabul qilindi!");
+        Serial.println(payload);
+
+        // Oddiy JSON parsing (qurilma va rangni topish)
+        int targetIdx = payload.indexOf("\"target\":\"");
+        int colorIdx = payload.indexOf("\"color\":\"");
+
+        String target = "PC1";
+        String colorHex = "#00ffcc";
+
+        if (targetIdx >= 0) {
+          int start = targetIdx + 10;
+          int end = payload.indexOf("\"", start);
+          if (end > start) target = payload.substring(start, end);
+        }
+
+        if (colorIdx >= 0) {
+          int start = colorIdx + 9;
+          int end = payload.indexOf("\"", start);
+          if (end > start) colorHex = payload.substring(start, end);
+        }
+
+        uint32_t color = parseHexColor(colorHex);
+        triggerPacketAnimation(target, color);
+      }
+    }
+    https.end();
+  }
+}
+
+// ======================================================================================
+// WEBSERVER HANDLERS
+// ======================================================================================
 void handlePing() {
   sendCorsHeader();
   server.send(200, "text/plain", "PONG");
 }
 
-// GET /clear
 void handleClear() {
   sendCorsHeader();
   strip->clear();
   strip->show();
-  server.send(200, "application/json", "{\"success\":true,\"message\":\"Cleared\"}");
+  server.send(200, "application/json", "{\"success\":true}");
 }
 
-// GET /sendWan?target=PC1&color=%2300ffcc
 void handleSendWan() {
   sendCorsHeader();
   String target = server.hasArg("target") ? server.arg("target") : "PC1";
   String colorHex = server.hasArg("color") ? server.arg("color") : "#00ffcc";
   uint32_t color = parseHexColor(colorHex);
 
-  Serial.printf("\n[BUYRUQ KELDI] /sendWan: Target=%s, Color=%s\n", target.c_str(), colorHex.c_str());
-
-  // Darhol javob qaytaramiz (brauzer kutib qolmasligi uchun)
   server.send(200, "application/json", "{\"success\":true,\"target\":\"" + target + "\"}");
-
-  // 1. WAN (Optik tola) segmentidan impuls o'tadi
-  animateSegment(cfg.wan_start, cfg.wan_end, color, 30);
-
-  // 2. Routerdan Switchga o'tadi
-  animateSegment(cfg.r_sw_start, cfg.r_sw_end, color, 30);
-
-  // 3. Switchdan Target qurilmaga o'tadi
-  if (target == "PC1") {
-    // Kabel bo'ylab yugurish
-    int monStart = max(cfg.pc1_start, cfg.pc1_end - 5); // Oxirgi 6 ta LED monitor uchun
-    animateSegment(cfg.pc1_start, monStart - 1, color, 30);
-    // Monitor miltillashi
-    blinkMonitor(monStart, cfg.pc1_end, color, 3);
-  } else if (target == "PC2") {
-    int monStart = max(cfg.pc2_start, cfg.pc2_end - 5);
-    animateSegment(cfg.pc2_start, monStart - 1, color, 30);
-    blinkMonitor(monStart, cfg.pc2_end, color, 3);
-  } else if (target == "Server0" || target == "Server") {
-    int monStart = max(cfg.srv_start, cfg.srv_end - 5);
-    animateSegment(cfg.srv_start, monStart - 1, color, 30);
-    blinkMonitor(monStart, cfg.srv_end, color, 3);
-  } else {
-    // Noma'lum qurilma bo'lsa barcha segmentlar bo'ylab o'chirish
-    strip->clear();
-    strip->show();
-  }
+  triggerPacketAnimation(target, color);
 }
 
-// GET /testLed?index=0&color=%2300ffcc
 void handleTestLed() {
   sendCorsHeader();
   int index = server.hasArg("index") ? server.arg("index").toInt() : 0;
@@ -227,12 +288,11 @@ void handleTestLed() {
     strip->clear();
     strip->setPixelColor(index, color);
     strip->show();
-    Serial.printf("[TEST-LED] LED #%d yondi (Rang: %s)\n", index, colorHex.c_str());
+    Serial.printf("[TEST-LED] LED #%d yondi (%s)\n", index, colorHex.c_str());
   }
   server.send(200, "application/json", "{\"success\":true,\"index\":" + String(index) + "}");
 }
 
-// GET /testAll?color=%23ffffff
 void handleTestAll() {
   sendCorsHeader();
   String colorHex = server.hasArg("color") ? server.arg("color") : "#ffffff";
@@ -243,10 +303,9 @@ void handleTestAll() {
   }
   strip->show();
   Serial.printf("[TEST-ALL] Barcha %d ta LED yondi\n", cfg.total);
-  server.send(200, "application/json", "{\"success\":true,\"total\":" + String(cfg.total) + "}");
+  server.send(200, "application/json", "{\"success\":true}");
 }
 
-// GET /getConfig
 void handleGetConfig() {
   sendCorsHeader();
   String json = "{";
@@ -262,12 +321,13 @@ void handleGetConfig() {
   json += "\"pc2_start\":" + String(cfg.pc2_start) + ",";
   json += "\"pc2_end\":" + String(cfg.pc2_end) + ",";
   json += "\"srv_start\":" + String(cfg.srv_start) + ",";
-  json += "\"srv_end\":" + String(cfg.srv_end);
+  json += "\"srv_end\":" + String(cfg.srv_end) + ",";
+  json += "\"wifi_connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
+  json += "\"ip\":\"" + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString()) + "\"";
   json += "}";
   server.send(200, "application/json", json);
 }
 
-// GET /saveConfig?pin=...&...
 void handleSaveConfig() {
   sendCorsHeader();
   if (server.hasArg("pin")) cfg.pin = server.arg("pin").toInt();
@@ -285,35 +345,60 @@ void handleSaveConfig() {
   if (server.hasArg("srv_end")) cfg.srv_end = server.arg("srv_end").toInt();
 
   savePreferences();
-  initStrip(); // Yangi parametrlar bilan lentani yangilash
-
-  server.send(200, "application/json", "{\"success\":true,\"message\":\"Saved to NVS successfully\"}");
+  initStrip();
+  server.send(200, "application/json", "{\"success\":true}");
 }
 
 // ======================================================================================
 // SETUP & LOOP
 // ======================================================================================
-
 void setup() {
   Serial.begin(115200);
   delay(500);
 
-  Serial.println("\n--- Cisco Packet Tracer Physical Prototype ---");
+  Serial.println("\n--- Cisco Packet Tracer Physical Prototype (Internet Edition) ---");
   loadPreferences();
   initStrip();
 
-  // Wi-Fi AP yaratish
-  WiFi.mode(WIFI_AP);
-  IPAddress local_ip(192, 168, 4, 1);
-  IPAddress gateway(192, 168, 4, 1);
-  IPAddress subnet(255, 255, 255, 0);
-  WiFi.softAPConfig(local_ip, gateway, subnet);
-  WiFi.softAP(ssid, password);
+  // Boshlang'ich test (chiroqlar 0.5 soniya yonib o'chadi)
+  for (int i = 0; i < cfg.total; i++) {
+    strip->setPixelColor(i, strip->Color(0, 255, 204));
+  }
+  strip->show();
+  delay(500);
+  strip->clear();
+  strip->show();
 
-  Serial.print("Wi-Fi AP ochildi: ");
-  Serial.println(ssid);
-  Serial.print("ESP32 IP: ");
+  // 1. Dual Wi-Fi rejimini yoqish (ham telefon Hotspotiga ulanadi, ham zaxira AP ochadi)
+  WiFi.mode(WIFI_AP_STA);
+
+  // Zaxira AP ochish
+  WiFi.softAP(ap_ssid, ap_password);
+  Serial.print("Zaxira Wi-Fi AP: ");
+  Serial.println(ap_ssid);
+  Serial.print("AP IP: ");
   Serial.println(WiFi.softAPIP());
+
+  // Telefon Hotspotiga ("Xiaomi 12 Lite") ulanish
+  Serial.printf("Internetga ulanilmoqda: '%s'...\n", sta_ssid);
+  WiFi.begin(sta_ssid, sta_password);
+
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 15) {
+    delay(500);
+    Serial.print(".");
+    tries++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n✅ INTERNETGA MUVAFFAQIYATLI ULANDI!");
+    Serial.print("ESP32 Lokal IP: ");
+    Serial.println(WiFi.localIP());
+    // Muvaffaqiyatli ulanish belgisi: 3 ta yashil chiroq yonadi
+    blinkMonitor(0, min(5, cfg.total - 1), strip->Color(0, 255, 0), 2);
+  } else {
+    Serial.println("\n⚠️ Telefon Hotspotiga ulanib bo'lmadi. Telefoningizda 'Точка доступа' yoqilganligini tekshiring.");
+  }
 
   // WebServer marshrutlari
   server.on("/ping", HTTP_GET, handlePing);
@@ -324,7 +409,6 @@ void setup() {
   server.on("/getConfig", HTTP_GET, handleGetConfig);
   server.on("/saveConfig", HTTP_GET, handleSaveConfig);
 
-  // Pre-flight OPTIONS CORS so'rovlari uchun
   server.onNotFound([]() {
     if (server.method() == HTTP_OPTIONS) {
       sendCorsHeader();
@@ -335,20 +419,15 @@ void setup() {
   });
 
   server.begin();
-  Serial.println("HTTP WebServer ishga tushdi!");
-  Serial.printf("LED Pin: GPIO %d, Jami LED: %d, Yorqinlik: %d\n", cfg.pin, cfg.total, cfg.brightness);
-
-  // Boshlang'ich TEST: Butun lenta 500ms ga chiroyli zangori yonib o'chadi
-  for (int i = 0; i < cfg.total; i++) {
-    strip->setPixelColor(i, strip->Color(0, 255, 204));
-  }
-  strip->show();
-  delay(600);
-  strip->clear();
-  strip->show();
-  Serial.println("Lenta self-test yakunlandi. ESP32 paket kutmoqda...");
+  Serial.println("WebServer faol!");
 }
 
 void loop() {
   server.handleClient();
+
+  // Har 1 soniyada Vercel bulut navbatini to'g'ridan-to'g'ri tekshirish
+  if (millis() - lastCloudCheck >= CLOUD_INTERVAL) {
+    lastCloudCheck = millis();
+    checkVercelQueue();
+  }
 }
